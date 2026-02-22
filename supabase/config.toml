@@ -1,0 +1,34 @@
+project_id = "cchznuyuomvcpftqtmnw"
+
+[functions.chat]
+verify_jwt = false
+
+[functions.elevenlabs-conversation-token]
+verify_jwt = false
+
+[functions.make-call]
+verify_jwt = false
+
+[functions.twilio-status-callback]
+verify_jwt = false
+
+[functions.tts-audio]
+verify_jwt = false
+
+[functions.twilio-media-stream]
+verify_jwt = false
+
+[functions.process-card-payment]
+verify_jwt = false
+
+[functions.analyze-anomalies]
+verify_jwt = false
+
+[functions.smart-chase]
+verify_jwt = false
+
+[functions.weekly-digest]
+verify_jwt = false
+
+[functions.generate-invoice-pdf]
+verify_jwt = false
