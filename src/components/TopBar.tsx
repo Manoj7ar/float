@@ -12,23 +12,30 @@ interface TopBarProps {
 
 export function TopBar({ title, subtitle }: TopBarProps) {
   const { account } = useAccount();
-  const initials = account?.business_name
-    ? account.business_name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
-    : "FL";
 
   return (
-    <header className="sticky top-3 z-30 mx-4 mt-3 flex h-14 items-center gap-4 rounded-2xl border border-border/70 bg-card/90 px-5 shadow-lg backdrop-blur-xl">
+    <header className="sticky top-3 z-30 mx-4 mt-3 flex min-h-14 items-center gap-3 rounded-2xl border border-border/70 bg-card/85 px-4 py-2 shadow-lg shadow-black/5 backdrop-blur-xl lg:mx-6 lg:px-5">
       <div className="min-w-0">
-        <h1 className="text-base font-semibold text-foreground leading-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-muted-foreground leading-tight">{subtitle}</p>}
+        <div className="flex items-center gap-2">
+          <h1 className="truncate text-base font-semibold leading-tight text-foreground">{title}</h1>
+          <span className="hidden items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-float-green" />
+            Live workspace
+          </span>
+        </div>
+        {subtitle && <p className="truncate text-xs leading-tight text-muted-foreground">{subtitle}</p>}
       </div>
 
       <NlQueryBar />
 
-      <div className="flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-xl border border-transparent text-muted-foreground hover:border-border/70 hover:bg-background/80 hover:text-foreground"
+            >
               <RefreshCw size={15} />
             </Button>
           </TooltipTrigger>
@@ -39,8 +46,12 @@ export function TopBar({ title, subtitle }: TopBarProps) {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground transition-transform hover:scale-105">
-              {initials}
+            <button
+              type="button"
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/80 p-1 shadow-sm transition-transform hover:scale-105"
+              aria-label="Float logo"
+            >
+              <img src="/float-logo.png" alt="Float" className="h-full w-full object-contain" />
             </button>
           </TooltipTrigger>
           <TooltipContent>{account?.business_name ?? "Account"}</TooltipContent>

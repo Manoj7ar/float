@@ -59,12 +59,18 @@ export function NlQueryBar() {
           try {
             const parsed = JSON.parse(json);
             const c = parsed.choices?.[0]?.delta?.content;
-            if (c) { result += c; setAnswer(result); }
-          } catch { buf = line + "\n" + buf; break; }
+            if (c) {
+              result += c;
+              setAnswer(result);
+            }
+          } catch {
+            buf = `${line}\n${buf}`;
+            break;
+          }
         }
       }
     } catch {
-      setAnswer("Sorry, I couldn't process that question. Try the full AI Chat instead.");
+      setAnswer("Sorry, I could not process that question. Try the full AI Chat instead.");
     } finally {
       setLoading(false);
     }
@@ -74,19 +80,25 @@ export function NlQueryBar() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="mx-auto hidden sm:flex h-8 w-72 items-center gap-2 rounded-full border border-border bg-background/60 px-3.5 text-xs text-muted-foreground transition-all hover:border-primary/30 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="mx-auto hidden h-9 w-72 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3.5 text-xs text-muted-foreground shadow-sm transition-all hover:border-primary/30 hover:bg-background/90 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:flex"
       >
         <Search size={13} className="shrink-0" />
-        <span className="truncate">Ask Float anything…</span>
+        <span className="truncate">Ask Float anything...</span>
+        <span className="ml-auto rounded-full border border-border/70 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]">
+          AI
+        </span>
       </button>
     );
   }
 
   return (
-    <div className="mx-auto hidden sm:block w-full max-w-xl relative">
-      <div className="rounded-xl border border-primary/30 bg-card shadow-lg overflow-hidden">
+    <div className="relative mx-auto hidden w-full max-w-xl sm:block">
+      <div className="overflow-hidden rounded-2xl border border-primary/25 bg-card/95 shadow-lg shadow-black/5 backdrop-blur">
         <form
-          onSubmit={(e) => { e.preventDefault(); ask(); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            ask();
+          }}
           className="flex items-center gap-2 px-3 py-2"
         >
           <Search size={14} className="shrink-0 text-muted-foreground" />
@@ -94,28 +106,47 @@ export function NlQueryBar() {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask about your cashflow, invoices, spending..."
-            className="border-0 shadow-none focus-visible:ring-0 h-8 text-sm bg-transparent"
+            placeholder="Ask about cashflow, invoices, or spending..."
+            className="h-8 border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
           />
-          <Button type="submit" size="icon" variant="ghost" className="h-7 w-7 shrink-0" disabled={loading || !query.trim()}>
+          <Button
+            type="submit"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 shrink-0"
+            disabled={loading || !query.trim()}
+          >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           </Button>
-          <Button type="button" size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => { setOpen(false); setAnswer(""); setQuery(""); }}>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 shrink-0"
+            onClick={() => {
+              setOpen(false);
+              setAnswer("");
+              setQuery("");
+            }}
+          >
             <X size={14} />
           </Button>
         </form>
+
         {(answer || loading) && (
-          <div className="border-t border-border px-4 py-3 max-h-60 overflow-y-auto">
+          <div className="max-h-60 overflow-y-auto border-t border-border/70 bg-background/55 px-4 py-3">
             {loading && !answer && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Bot size={14} className="text-primary" />
-                <Loader2 size={12} className="animate-spin" /> Thinking…
+                <Loader2 size={12} className="animate-spin" />
+                <span>Thinking...</span>
               </div>
             )}
+
             {answer && (
               <div className="flex gap-2">
                 <Bot size={14} className="mt-1 shrink-0 text-primary" />
-                <div className="prose prose-sm max-w-none text-sm dark:prose-invert">
+                <div className="prose prose-sm max-w-none text-sm prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 dark:prose-invert">
                   <ReactMarkdown>{answer}</ReactMarkdown>
                 </div>
               </div>
