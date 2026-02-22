@@ -96,7 +96,6 @@ export default function DashboardPage() {
       <TopBar
         title="Dashboard"
         subtitle={usingDemoData ? `${account?.business_name ?? "Business"} (demo data)` : account?.business_name ?? undefined}
-        insightCount={insights.length}
       />
 
       <div className="space-y-6 p-4 lg:p-6">

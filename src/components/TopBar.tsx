@@ -8,7 +8,6 @@ import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 interface TopBarProps {
   title: string;
   subtitle?: string;
-  insightCount?: number;
 }
 
 export function TopBar({ title, subtitle }: TopBarProps) {
