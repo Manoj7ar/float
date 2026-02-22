@@ -294,29 +294,6 @@ supabase functions deploy chat smart-chase weekly-digest analyze-anomalies extra
 5. `twilio-status-callback` updates call outcome/duration
 6. Call records become visible in realtime on `/calls`
 
-## Demo Mode / Fallback Data
-
-The app is designed to remain demoable even without live banking or production rows.
-
-Fallback/demo behavior exists for:
-- dashboard data
-- AI chat history/content
-- incidents
-- invoice/call flows (demo scenarios where applicable)
-
-This is ideal for hackathon demos and judge walkthroughs.
-
-## Suggested Demo Script (Hackathon)
-
-1. Open `/dashboard`
-2. Show KPI cards + cashflow projection
-3. Run **Smart Chase** and **Weekly Digest**
-4. Open `/chat` and ask:
-   - "Can I afford payroll this month?"
-   - "Call our debtors and get our money"
-5. Open `/calls` and show queue + call history
-6. Open `/incidents` and explain AI learnings / past issues
-
 ## Known Notes / Practical Caveats
 
 - Some UI areas still include hardcoded visual styles tuned for the current light-first design.
