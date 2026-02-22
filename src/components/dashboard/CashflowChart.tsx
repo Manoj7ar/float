@@ -576,15 +576,31 @@ function ScenarioSummary({ chartData, payrollThreshold }: {
   if (projected.length === 0) return null;
 
   const lastPoint = projected[projected.length - 1];
-  const bestVals = projected.map((d) => d.bestCase!).filter(Boolean);
-  const worstVals = projected.map((d) => d.worstCase!).filter(Boolean);
+  const projectedVals = projected
+    .map((d) => d.projected)
+    .filter((v): v is number => v != null);
+  const bestVals = projected
+    .map((d) => d.bestCase)
+    .filter((v): v is number => v != null);
+  const worstVals = projected
+    .map((d) => d.worstCase)
+    .filter((v): v is number => v != null);
 
   const bestEnd = lastPoint.bestCase ?? 0;
   const worstEnd = lastPoint.worstCase ?? 0;
   const baseEnd = lastPoint.projected ?? 0;
   const range = bestEnd - worstEnd;
   const worstDaysBelow = worstVals.filter((v) => v < payrollThreshold).length;
-  const bestPeak = bestVals.length > 0 ? Math.max(...bestVals) : 0;
+  const scenarioHighest = bestVals.length > 0 ? Math.max(...bestVals) : Math.max(...projectedVals);
+  const scenarioLowest = worstVals.length > 0 ? Math.min(...worstVals) : Math.min(...projectedVals);
+  const scenarioAverage = projectedVals.length > 0
+    ? Math.round(projectedVals.reduce((sum, v) => sum + v, 0) / projectedVals.length)
+    : baseEnd;
+  const highPoint = projected.find((d) => d.bestCase === scenarioHighest);
+  const lowPoint = projected.find((d) => d.worstCase === scenarioLowest);
+  const envelopeRange = Math.max(1, scenarioHighest - scenarioLowest);
+  const avgPos = Math.min(100, Math.max(0, ((scenarioAverage - scenarioLowest) / envelopeRange) * 100));
+  const baseEndPos = Math.min(100, Math.max(0, ((baseEnd - scenarioLowest) / envelopeRange) * 100));
 
   return (
     <div className="mt-4 rounded-2xl border border-border/60 bg-gradient-to-br from-accent/30 via-background/80 to-background p-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -593,11 +609,29 @@ function ScenarioSummary({ chartData, payrollThreshold }: {
         <span className="text-xs font-semibold text-foreground">Scenario Analysis</span>
         <span className="text-[10px] text-muted-foreground ml-auto">{projected.length}-day outlook</span>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <ScenarioMetric
+          label="Highest forecast"
+          value={formatCurrency(scenarioHighest)}
+          sub={highPoint ? `Peak on ${highPoint.date}` : "Scenario peak"}
+          color="text-float-green"
+        />
+        <ScenarioMetric
+          label="Average forecast"
+          value={formatCurrency(scenarioAverage)}
+          sub={`Base forecast avg (${projectedVals.length} pts)`}
+          color="text-foreground"
+        />
+        <ScenarioMetric
+          label="Lowest forecast"
+          value={formatCurrency(scenarioLowest)}
+          sub={lowPoint ? `Floor on ${lowPoint.date}` : "Scenario floor"}
+          color="text-float-red"
+        />
         <ScenarioMetric
           label="Best case end"
           value={formatCurrency(bestEnd)}
-          sub={`+${formatCurrency(bestEnd - baseEnd)} vs base`}
+          sub={`${bestEnd >= baseEnd ? "+" : ""}${formatCurrency(bestEnd - baseEnd)} vs base`}
           color="text-float-green"
         />
         <ScenarioMetric
@@ -607,40 +641,62 @@ function ScenarioSummary({ chartData, payrollThreshold }: {
           color="text-float-red"
         />
         <ScenarioMetric
-          label="Outcome range"
+          label="Scenario spread"
           value={formatCurrency(range)}
-          sub="Between best & worst"
+          sub="End-of-period gap"
           color="text-foreground"
         />
-        <ScenarioMetric
-          label="Worst payroll risk"
-          value={worstDaysBelow > 0 ? `${worstDaysBelow} days` : "None"}
-          sub={worstDaysBelow > 0 ? "Days below threshold" : "Always covered"}
-          color={worstDaysBelow > 0 ? "text-float-red" : "text-float-green"}
-        />
       </div>
-      {/* Range bar */}
-      <div className="mt-3 pt-3 border-t border-border">
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1.5">
-          <span>Worst</span>
-          <span>Base</span>
-          <span>Best</span>
+      <div className="mt-3 rounded-xl border border-border/70 bg-background/60 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-[10px] font-medium text-muted-foreground">Projected range (low / avg / high)</p>
+          <p className="text-[10px] text-muted-foreground">
+            {worstDaysBelow > 0 ? `${worstDaysBelow}d below payroll (worst case)` : "Payroll covered in worst case"}
+          </p>
         </div>
-        <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+
+        <div className="relative h-3 rounded-full bg-muted/80 overflow-hidden">
           <div
-            className="absolute inset-y-0 rounded-full"
+            className="absolute inset-0 rounded-full"
             style={{
-              left: "0%",
-              right: `${Math.max(0, 100 - ((bestEnd - worstEnd) > 0 ? 100 : 0))}%`,
-              background: "linear-gradient(90deg, hsl(var(--float-red)), hsl(var(--float-amber)), hsl(var(--float-green)))",
+              background: "linear-gradient(90deg, hsl(var(--float-red)) 0%, hsl(var(--float-amber)) 50%, hsl(var(--float-green)) 100%)",
+              opacity: 0.85,
             }}
           />
-          {/* Base marker */}
+
+          <div className="absolute inset-y-0 left-0 w-0.5 bg-background/90" />
+          <div className="absolute inset-y-0 right-0 w-0.5 bg-background/90" />
+
           <div
-            className="absolute top-0 bottom-0 w-0.5 bg-foreground"
-            style={{ left: range > 0 ? `${((baseEnd - worstEnd) / range) * 100}%` : "50%" }}
+            className="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-background bg-float-amber shadow-sm"
+            style={{ left: `calc(${avgPos}% - 8px)` }}
+            aria-hidden="true"
+          />
+
+          <div
+            className="absolute inset-y-0 w-0.5 bg-foreground/80"
+            style={{ left: `${baseEndPos}%` }}
+            aria-hidden="true"
           />
         </div>
+
+        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+          <div>
+            <p className="text-muted-foreground">Lowest</p>
+            <p className="font-mono font-semibold tabular-nums text-float-red">{formatCurrency(scenarioLowest)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-muted-foreground">Average</p>
+            <p className="font-mono font-semibold tabular-nums text-float-amber">{formatCurrency(scenarioAverage)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-muted-foreground">Highest</p>
+            <p className="font-mono font-semibold tabular-nums text-float-green">{formatCurrency(scenarioHighest)}</p>
+          </div>
+        </div>
+        <p className="mt-2 text-[9px] text-muted-foreground">
+          Thin marker = base case ending balance ({formatCurrency(baseEnd)})
+        </p>
       </div>
     </div>
   );
