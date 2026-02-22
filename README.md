@@ -150,6 +150,13 @@ supabase/
     process-card-payment/
     send-payment-link/
     monzo-webhook/
+Hackathon Challenges intigrations/
+  Claude.md
+  Elevenlabs.md
+  Lovable.md
+  Stripe.md
+  Susquehanna.md
+  incident.md
 ```
 
 ## Local Development (Fast Start)
