@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.generate-invoice-pdf]
 verify_jwt = false
+
+[functions.send-payment-link]
+verify_jwt = false

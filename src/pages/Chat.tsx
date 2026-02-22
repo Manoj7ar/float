@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, User, Loader2 } from "lucide-react";
+import { Send, User, Loader2, PhoneOutgoing, CheckCircle2, XCircle, Clock3, PhoneCall } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -7,15 +7,39 @@ import { useAccount } from "@/hooks/useAccount";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import { useToast } from "@/hooks/use-toast";
-import { getDemoChatMessages } from "@/lib/demo-content";
+import { getDemoChatMessages, getDemoInvoices } from "@/lib/demo-content";
+import { formatCurrency } from "@/lib/format";
+import type { Tables } from "@/integrations/supabase/types";
 
 type Msg = { role: "user" | "assistant"; content: string };
+type Invoice = Tables<"invoices">;
+type CallProgressStatus = "queued" | "dialing" | "started" | "failed";
+type CallProgress = {
+  invoiceId: string;
+  clientName: string;
+  clientPhone: string;
+  invoiceNumber: string;
+  amount: number;
+  status: CallProgressStatus;
+  error?: string;
+};
+type CallRunState = {
+  active: boolean;
+  jobs: CallProgress[];
+  started: number;
+  failed: number;
+};
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const CALLABLE_STATUSES = ["overdue", "chasing", "unpaid"] as const;
+const MAX_CHAT_CALLS = 5;
+const DEMO_CALL_PHONE = "+353894008256";
+const DEMO_CALL_NAME = "Float Demo Business";
 const QUICK_PROMPTS = [
   "What did Float learn from past incidents?",
   "What's my cashflow outlook?",
   "Which invoices are overdue?",
+  "Call our debtors and get our money",
   "Can I afford payroll this month?",
   "Where am I spending the most?",
 ];
@@ -37,10 +61,25 @@ function buildDemoReply(prompt: string) {
   return "Demo mode is active for this chat. Ask about payroll, overdue invoices, incidents, or call outcomes to explore the scenario.";
 }
 
+function isCollectionCallIntent(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  const hasCallVerb = /(call|phone|ring|dial)/.test(normalized);
+  const hasCollectionsContext =
+    /(debtor|debtors|creditor|creditors|invoice|overdue|collect|collection|chase|get our money|get money)/.test(normalized);
+  return hasCallVerb && hasCollectionsContext;
+}
+
+function callStatusLabel(status: CallProgressStatus) {
+  if (status === "queued") return "Queued";
+  if (status === "dialing") return "Dialing";
+  if (status === "started") return "In Progress";
+  return "Failed";
+}
+
 function AiAvatar({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   const sizeClass = size === "lg" ? "h-16 w-16" : size === "sm" ? "h-8 w-8" : "h-10 w-10";
   return (
-    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/20 bg-white ${sizeClass}`}>
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card ${sizeClass}`}>
       <img src="/float-logo.png" alt="Float AI" className="h-full w-full object-contain" />
     </div>
   );
@@ -116,8 +155,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [callingFromChat, setCallingFromChat] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [usingDemoHistory, setUsingDemoHistory] = useState(false);
+  const [callRun, setCallRun] = useState<CallRunState | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadDemoHistory = useCallback(() => {
@@ -179,15 +220,184 @@ export default function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, callRun]);
+
+  const persistChatMessage = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      if (!account) return;
+      supabase.from("chat_messages").insert({
+        account_id: account.id,
+        role,
+        content,
+      });
+    },
+    [account],
+  );
+
+  const getCallableInvoices = useCallback(async (): Promise<Invoice[]> => {
+    if (account) {
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("*")
+        .eq("account_id", account.id)
+        .in("status", [...CALLABLE_STATUSES])
+        .not("client_phone", "is", null)
+        .order("due_date", { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    }
+
+    return getDemoInvoices(account?.id ?? "demo-account")
+      .filter((item) => CALLABLE_STATUSES.includes((item.status ?? "unpaid") as typeof CALLABLE_STATUSES[number]))
+      .map((item) => ({
+        ...item,
+        client_name: DEMO_CALL_NAME,
+        client_phone: DEMO_CALL_PHONE,
+      }));
+  }, [account]);
+
+  const updateCallJob = useCallback((invoiceId: string, patch: Partial<CallProgress>) => {
+    setCallRun((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        jobs: prev.jobs.map((job) => (job.invoiceId === invoiceId ? { ...job, ...patch } : job)),
+      };
+    });
+  }, []);
+
+  const triggerCollectionCalls = useCallback(
+    async () => {
+      setCallingFromChat(true);
+      const intro =
+        "Understood. I am launching collection calls now and will show live progress below as each debtor is dialed.";
+      setMessages((prev) => [...prev, { role: "assistant", content: intro }]);
+      persistChatMessage("assistant", intro);
+
+      try {
+        const candidates = await getCallableInvoices();
+        const selected = candidates.slice(0, MAX_CHAT_CALLS);
+
+        if (selected.length === 0) {
+          const noTargets =
+            "I could not find any debtors with callable phone numbers. Add client phone numbers in Dashboard, then ask me to call again.";
+          setMessages((prev) => [...prev, { role: "assistant", content: noTargets }]);
+          persistChatMessage("assistant", noTargets);
+          setCallRun(null);
+          return;
+        }
+
+        const jobs: CallProgress[] = selected.map((invoice) => ({
+          invoiceId: invoice.id,
+          clientName: invoice.client_name,
+          clientPhone: invoice.client_phone ?? "Unknown",
+          invoiceNumber: invoice.invoice_number ?? "Unknown",
+          amount: invoice.amount,
+          status: "queued",
+        }));
+
+        setCallRun({ active: true, jobs, started: 0, failed: 0 });
+        let started = 0;
+        let failed = 0;
+
+        for (const invoice of selected) {
+          updateCallJob(invoice.id, { status: "dialing", error: undefined });
+
+          let callId: string | undefined;
+          const isDemoInvoice = invoice.id.startsWith("demo-");
+
+          if (account && !isDemoInvoice) {
+            const { data: callRecord, error: insertError } = await supabase
+              .from("calls")
+              .insert({
+                account_id: account.id,
+                invoice_id: invoice.id,
+                client_name: invoice.client_name,
+                client_phone: invoice.client_phone ?? "Unknown",
+                status: "initiated",
+              })
+              .select()
+              .single();
+
+            if (!insertError) {
+              callId = callRecord?.id;
+            }
+          }
+
+          const dueDate = invoice.due_date
+            ? new Date(invoice.due_date).toLocaleDateString("en-IE", { month: "long", day: "numeric", year: "numeric" })
+            : undefined;
+
+          const { data, error } = await supabase.functions.invoke("make-call", {
+            body: {
+              to: invoice.client_phone,
+              clientName: invoice.client_name,
+              clientEmail: invoice.client_email,
+              invoiceNumber: invoice.invoice_number,
+              invoiceId: isDemoInvoice ? undefined : invoice.id,
+              amount: invoice.amount,
+              dueDate,
+              callId,
+            },
+          });
+
+          if (error || !data?.success) {
+            failed += 1;
+            updateCallJob(invoice.id, {
+              status: "failed",
+              error: error?.message || data?.error || "Call failed",
+            });
+            setCallRun((prev) => (prev ? { ...prev, failed } : prev));
+            if (callId) {
+              await supabase
+                .from("calls")
+                .update({ status: "failed", completed_at: new Date().toISOString(), outcome: error?.message || "Call failed" })
+                .eq("id", callId);
+            }
+            continue;
+          }
+
+          started += 1;
+          updateCallJob(invoice.id, { status: "started" });
+          setCallRun((prev) => (prev ? { ...prev, started } : prev));
+          if (callId) {
+            await supabase.from("calls").update({ status: "in-progress" }).eq("id", callId);
+          }
+        }
+
+        setCallRun((prev) => (prev ? { ...prev, active: false, started, failed } : prev));
+
+        const limited = candidates.length > MAX_CHAT_CALLS;
+        const summary = `Call run complete. Started ${started} call${started === 1 ? "" : "s"} and failed ${failed}.${
+          limited ? ` I limited this run to the first ${MAX_CHAT_CALLS} debtors.` : ""
+        }`;
+        setMessages((prev) => [...prev, { role: "assistant", content: summary }]);
+        persistChatMessage("assistant", summary);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Failed to start collection calls";
+        setMessages((prev) => [...prev, { role: "assistant", content: `I hit an error while placing calls: ${message}` }]);
+      } finally {
+        setCallingFromChat(false);
+      }
+    },
+    [account, getCallableInvoices, persistChatMessage, updateCallJob],
+  );
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || callingFromChat) return;
     setInput("");
 
     const userMsg: Msg = { role: "user", content: text };
     setMessages((p) => [...p, userMsg]);
+    persistChatMessage("user", text);
+
+    if (isCollectionCallIntent(text)) {
+      await triggerCollectionCalls();
+      return;
+    }
 
     let assistantSoFar = "";
     const upsert = (chunk: string) => {
@@ -208,11 +418,6 @@ export default function ChatPage() {
     }
 
     setLoading(true);
-    supabase.from("chat_messages").insert({
-      account_id: account.id,
-      role: "user",
-      content: text,
-    });
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 20000);
 
@@ -225,11 +430,7 @@ export default function ChatPage() {
         onDone: () => {
           setLoading(false);
           if (assistantSoFar) {
-            supabase.from("chat_messages").insert({
-              account_id: account.id,
-              role: "assistant",
-              content: assistantSoFar,
-            });
+            persistChatMessage("assistant", assistantSoFar);
           }
         },
       });
@@ -257,7 +458,7 @@ export default function ChatPage() {
     } finally {
       window.clearTimeout(timeoutId);
     }
-  }, [input, loading, account, messages, toast, usingDemoHistory]);
+  }, [input, loading, callingFromChat, persistChatMessage, triggerCollectionCalls, account, messages, toast, usingDemoHistory]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-gradient-to-b from-background via-background to-card/40">
@@ -268,7 +469,7 @@ export default function ChatPage() {
             <h1 className="text-lg font-semibold text-foreground">AI Chat</h1>
             <p className="text-sm text-muted-foreground">Ask Float about cashflow, invoices, payroll, and risks.</p>
           </div>
-          <div className="hidden items-center gap-2 rounded-full border border-black/20 bg-white/80 px-2.5 py-1.5 text-xs text-black/70 sm:flex">
+          <div className="hidden items-center gap-2 rounded-full border border-border bg-background/80 px-2.5 py-1.5 text-xs text-muted-foreground sm:flex">
             <AiAvatar size="sm" />
             <span>AI Online</span>
           </div>
@@ -278,11 +479,11 @@ export default function ChatPage() {
       <ScrollArea className="flex-1">
         <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
           {loadingHistory ? (
-            <div className="flex items-center justify-center rounded-2xl border border-black/10 bg-card/70 py-14 text-muted-foreground">
+            <div className="flex items-center justify-center rounded-2xl border border-border/70 bg-card/70 py-14 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading history...
             </div>
           ) : messages.length === 0 ? (
-            <div className="rounded-2xl border border-black/20 bg-card p-7 text-center shadow-sm sm:p-9">
+            <div className="rounded-2xl border border-border/70 bg-card p-7 text-center shadow-sm sm:p-9">
               <div className="mb-4 flex justify-center">
                 <AiAvatar size="lg" />
               </div>
@@ -297,7 +498,7 @@ export default function ChatPage() {
                     onClick={() => {
                       setInput(q);
                     }}
-                    className="rounded-full border border-black/25 bg-white px-4 py-2 text-sm text-foreground transition-colors hover:bg-black hover:text-white"
+                    className="rounded-full border border-border bg-background px-4 py-2 text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                   >
                     {q}
                   </button>
@@ -312,8 +513,8 @@ export default function ChatPage() {
                   <div
                     className={`max-w-[86%] rounded-2xl border px-4 py-3 text-sm leading-relaxed sm:max-w-[78%] ${
                       m.role === "user"
-                        ? "border-black bg-black text-white"
-                        : "border-black/20 bg-card text-foreground shadow-sm"
+                        ? "border-primary/30 bg-primary text-primary-foreground"
+                        : "border-border/70 bg-card text-foreground shadow-sm"
                     }`}
                   >
                     {m.role === "assistant" ? (
@@ -325,8 +526,8 @@ export default function ChatPage() {
                     )}
                   </div>
                   {m.role === "user" && (
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-black/35 bg-white">
-                      <User className="h-4 w-4 text-black/70" />
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+                      <User className="h-4 w-4 text-muted-foreground" />
                     </div>
                   )}
                 </div>
@@ -334,11 +535,60 @@ export default function ChatPage() {
             </div>
           )}
 
+          {callRun && (
+            <div className="mt-4 flex gap-3">
+              <AiAvatar size="sm" />
+              <div className="w-full max-w-[86%] rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm shadow-sm sm:max-w-[78%]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-medium text-foreground">
+                    <PhoneOutgoing className="h-4 w-4" />
+                    <span>{callRun.active ? "Agent is placing calls..." : "Call run finished"}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {callRun.started} started, {callRun.failed} failed
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {callRun.jobs.map((job) => (
+                    <div key={job.invoiceId} className="rounded-xl border border-border/70 bg-background/80 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-foreground">
+                            {job.clientName} • {job.invoiceNumber}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {job.clientPhone} • {formatCurrency(job.amount, account?.currency)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                          {job.status === "queued" && <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {job.status === "dialing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                          {job.status === "started" && <CheckCircle2 className="h-3.5 w-3.5 text-float-green" />}
+                          {job.status === "failed" && <XCircle className="h-3.5 w-3.5 text-float-red" />}
+                          <span>{callStatusLabel(job.status)}</span>
+                        </div>
+                      </div>
+                      {job.error && <p className="mt-1 text-[11px] text-float-red">{job.error}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {loading && messages[messages.length - 1]?.role === "user" && (
             <div className="mt-4 flex gap-3">
               <AiAvatar size="sm" />
-              <div className="flex items-center gap-2 rounded-2xl border border-black/20 bg-card px-4 py-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" /> Float is thinking...
+              </div>
+            </div>
+          )}
+          {callingFromChat && (
+            <div className="mt-4 flex gap-3">
+              <AiAvatar size="sm" />
+              <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground">
+                <PhoneCall className="h-3.5 w-3.5" /> Calling debtors now...
               </div>
             </div>
           )}
@@ -358,14 +608,14 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about your cashflow, invoices, payroll..."
-            disabled={loading}
-            className="h-11 flex-1 rounded-xl border-black/25 bg-white"
+            disabled={loading || callingFromChat}
+            className="h-11 flex-1 rounded-xl border-input bg-background"
           />
           <Button
             type="submit"
-            disabled={loading || !input.trim()}
+            disabled={loading || callingFromChat || !input.trim()}
             size="icon"
-            className="h-11 w-11 rounded-xl border border-black bg-black text-white hover:bg-black/90"
+            className="h-11 w-11 rounded-xl"
           >
             <Send className="h-4 w-4" />
           </Button>

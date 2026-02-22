@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  Mail,
   Phone,
   PhoneCall,
   PhoneOff,
@@ -41,6 +42,9 @@ type Call = Tables<"calls">;
 type Invoice = Tables<"invoices">;
 
 type HistoryFilter = "all" | "completed" | "failed" | "initiated" | "in-progress";
+const DEMO_BUSINESS_NAME = "Float Demo Business";
+const DEMO_TEST_PHONE = "+353894008256";
+const CALLABLE_STATUSES: Array<Invoice["status"]> = ["overdue", "chasing", "unpaid"];
 
 const statusConfig: Record<string, { icon: ReactNode; className: string; label: string }> = {
   completed: {
@@ -96,8 +100,26 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getCallsDemoFallback(accountId: string): Call[] {
+  return getDemoCalls(accountId).map((call) => ({
+    ...call,
+    client_name: DEMO_BUSINESS_NAME,
+    client_phone: DEMO_TEST_PHONE,
+  }));
+}
+
+function getInvoicesDemoFallback(accountId: string): Invoice[] {
+  return getDemoInvoices(accountId)
+    .filter((item) => CALLABLE_STATUSES.includes(item.status))
+    .map((invoice) => ({
+      ...invoice,
+      client_name: DEMO_BUSINESS_NAME,
+      client_phone: DEMO_TEST_PHONE,
+    }));
+}
+
 export default function CallsPage() {
-  const { account } = useAccount();
+  const { account, loading: accountLoading } = useAccount();
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
@@ -108,6 +130,7 @@ export default function CallsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [callingInvoiceId, setCallingInvoiceId] = useState<string | null>(null);
+  const [sendingPaymentLinkInvoiceId, setSendingPaymentLinkInvoiceId] = useState<string | null>(null);
   const [callingAll, setCallingAll] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
@@ -133,23 +156,23 @@ export default function CallsPage() {
             .from("invoices")
             .select("*")
             .eq("account_id", account.id)
-            .in("status", ["overdue", "chasing", "unpaid"]),
+            .in("status", CALLABLE_STATUSES),
         ]);
 
         if (callsRes.error) throw callsRes.error;
         if (invRes.error) throw invRes.error;
 
-        const nextCalls = (callsRes.data?.length ?? 0) > 0 ? callsRes.data! : getDemoCalls(account.id);
+        const nextCalls = (callsRes.data?.length ?? 0) > 0 ? callsRes.data! : getCallsDemoFallback(account.id);
         const nextInvoices = (invRes.data?.length ?? 0) > 0
           ? invRes.data!
-          : getDemoInvoices(account.id).filter((item) => item.status === "overdue" || item.status === "chasing" || item.status === "unpaid");
+          : getInvoicesDemoFallback(account.id);
 
         setCalls(nextCalls);
         setInvoices(nextInvoices);
         setUsingDemoData((callsRes.data?.length ?? 0) === 0 && (invRes.data?.length ?? 0) === 0);
       } catch (error: unknown) {
-        setCalls(getDemoCalls(account.id));
-        setInvoices(getDemoInvoices(account.id).filter((item) => item.status === "overdue" || item.status === "chasing" || item.status === "unpaid"));
+        setCalls(getCallsDemoFallback(account.id));
+        setInvoices(getInvoicesDemoFallback(account.id));
         setUsingDemoData(true);
         if (!options?.background) {
           toast({
@@ -169,6 +192,15 @@ export default function CallsPage() {
     if (!account) return;
     void loadData();
   }, [account, loadData]);
+
+  useEffect(() => {
+    if (accountLoading || account) return;
+    const fallbackAccountId = "demo-account-calls";
+    setCalls(getCallsDemoFallback(fallbackAccountId));
+    setInvoices(getInvoicesDemoFallback(fallbackAccountId));
+    setUsingDemoData(true);
+    setLoading(false);
+  }, [account, accountLoading]);
 
   useEffect(() => {
     if (!account) return;
@@ -216,60 +248,7 @@ export default function CallsPage() {
         silentError?: boolean;
       },
     ) => {
-      if (isDemoId(invoice.id)) {
-        setCallingInvoiceId(invoice.id);
-        try {
-          const now = new Date();
-          const demoCallId = `demo-call-live-${now.getTime()}`;
-          const initiatedAt = now.toISOString();
-
-          setCalls((prev) => [
-            {
-              id: demoCallId,
-              account_id: invoice.account_id,
-              invoice_id: invoice.id,
-              client_name: invoice.client_name,
-              client_phone: invoice.client_phone ?? "Unknown",
-              status: "initiated",
-              initiated_at: initiatedAt,
-              completed_at: null,
-              duration_seconds: null,
-              outcome: null,
-              transcript: null,
-            },
-            ...prev,
-          ]);
-
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-
-          setCalls((prev) =>
-            prev.map((call) =>
-              call.id === demoCallId
-                ? {
-                    ...call,
-                    status: "completed",
-                    completed_at: new Date(now.getTime() + 95000).toISOString(),
-                    duration_seconds: 95,
-                    outcome: "Demo call completed with payment commitment within 24h.",
-                    transcript:
-                      "Assistant confirmed invoice details, provided payment options, and secured a commitment to settle today.",
-                  }
-                : call,
-            ),
-          );
-
-          if (!options?.silentSuccess) {
-            toast({
-              title: "Demo call simulated",
-              description: `Simulated collection call for ${invoice.client_name}.`,
-            });
-          }
-
-          return true;
-        } finally {
-          setCallingInvoiceId(null);
-        }
-      }
+      const demoInvoice = isDemoId(invoice.id);
 
       if (!invoice.client_phone) {
         toast({
@@ -283,7 +262,7 @@ export default function CallsPage() {
       setCallingInvoiceId(invoice.id);
       try {
         let callId: string | undefined;
-        if (account) {
+        if (account && !demoInvoice) {
           const { data: callRecord, error: insertError } = await supabase
             .from("calls")
             .insert({
@@ -304,8 +283,9 @@ export default function CallsPage() {
           body: {
             to: invoice.client_phone,
             clientName: invoice.client_name,
+            clientEmail: invoice.client_email,
             invoiceNumber: invoice.invoice_number,
-            invoiceId: invoice.id,
+            invoiceId: demoInvoice ? undefined : invoice.id,
             amount: invoice.amount,
             dueDate: invoice.due_date ? format(new Date(invoice.due_date), "MMMM d, yyyy") : undefined,
             callId,
@@ -344,9 +324,58 @@ export default function CallsPage() {
     [account, toast],
   );
 
+  const sendPaymentLink = useCallback(
+    async (invoice: Invoice) => {
+      if (!invoice.client_email) {
+        toast({
+          variant: "destructive",
+          title: "No client email",
+          description: "Add an email for this client before sending a payment link.",
+        });
+        return false;
+      }
+
+      setSendingPaymentLinkInvoiceId(invoice.id);
+      try {
+        const demoInvoice = isDemoId(invoice.id);
+        const { data, error } = await supabase.functions.invoke("send-payment-link", {
+          body: {
+            invoice_id: demoInvoice ? undefined : invoice.id,
+            invoice_number: invoice.invoice_number,
+            client_name: invoice.client_name,
+            client_email: invoice.client_email,
+            amount_cents: invoice.amount,
+            currency: "eur",
+          },
+        });
+
+        if (error || !data?.success) {
+          throw new Error(error?.message || data?.error || "Failed to send payment link");
+        }
+
+        toast({
+          title: "Payment link sent",
+          description: `Sent to ${data.client_email || invoice.client_email}.`,
+        });
+        return true;
+      } catch (error: unknown) {
+        toast({
+          variant: "destructive",
+          title: "Payment link failed",
+          description: getErrorMessage(error, "Unable to send payment link right now."),
+        });
+        return false;
+      } finally {
+        setSendingPaymentLinkInvoiceId(null);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
     const state = location.state as { autoCallInvoice?: Invoice } | null;
-    if (!state?.autoCallInvoice || !account || loading) return;
+    if (!state?.autoCallInvoice || loading) return;
+    if (!account && !isDemoId(state.autoCallInvoice.id)) return;
 
     void startCall(state.autoCallInvoice);
     navigate(location.pathname, { replace: true, state: null });
@@ -412,12 +441,12 @@ export default function CallsPage() {
   );
 
   const clearAllCalls = useCallback(async () => {
-    if (!account || calls.length === 0) return;
+    if (calls.length === 0) return;
     const confirmed = window.confirm("Delete all call history? This action cannot be undone.");
     if (!confirmed) return;
 
     const allDemo = calls.every((call) => isDemoId(call.id));
-    if (allDemo) {
+    if (allDemo || !account) {
       setCalls([]);
       setSelectedCall(null);
       toast({ title: "Demo call history cleared" });
@@ -747,6 +776,7 @@ export default function CallsPage() {
                   <div className="space-y-2 p-3">
                     {overdueInvoices.map((invoice) => {
                       const isCalling = callingInvoiceId === invoice.id;
+                      const isSendingLink = sendingPaymentLinkInvoiceId === invoice.id;
                       const dueDate = invoice.due_date ? new Date(invoice.due_date) : null;
                       const isValidDueDate = dueDate ? !Number.isNaN(dueDate.getTime()) : false;
                       const daysOverdue = isValidDueDate ? differenceInCalendarDays(new Date(), dueDate as Date) : null;
@@ -776,25 +806,47 @@ export default function CallsPage() {
                               )}
                             </div>
 
-                            <Button
-                              size="sm"
-                              className="h-7 px-2.5 text-xs"
-                              onClick={() => void startCall(invoice)}
-                              disabled={!!callingInvoiceId || callingAll}
-                            >
-                              {isCalling ? (
-                                <>
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  Calling...
-                                </>
-                              ) : (
-                                <>
-                                  <Phone className="h-3 w-3" />
-                                  Call Now
-                                  <ArrowUpRight className="h-3 w-3 opacity-70" />
-                                </>
-                              )}
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2.5 text-xs"
+                                onClick={() => void sendPaymentLink(invoice)}
+                                disabled={!!callingInvoiceId || callingAll || !!sendingPaymentLinkInvoiceId}
+                              >
+                                {isSendingLink ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Sending...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mail className="h-3 w-3" />
+                                    Send Link
+                                  </>
+                                )}
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                className="h-7 px-2.5 text-xs"
+                                onClick={() => void startCall(invoice)}
+                                disabled={!!callingInvoiceId || callingAll || !!sendingPaymentLinkInvoiceId}
+                              >
+                                {isCalling ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Calling...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Phone className="h-3 w-3" />
+                                    Call Now
+                                    <ArrowUpRight className="h-3 w-3 opacity-70" />
+                                  </>
+                                )}
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       );

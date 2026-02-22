@@ -64,15 +64,15 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
       icon: Wallet,
       value: formatCurrency(balance, currency),
       badge: account?.monzo_connected ? "Live" : "Demo",
-      badgeClassName: "border-black/30 bg-black/5 text-black/70",
-      iconWrapClassName: "border-black/20 bg-black/5 text-black/80",
+      badgeClassName: "border-border bg-background text-muted-foreground",
+      iconWrapClassName: "border-border bg-background text-foreground",
       detail: (
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 text-black/70">
-            <TrendingDown size={12} className="text-black/55" />
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <TrendingDown size={12} className="text-muted-foreground/80" />
             {balanceTrend} vs last week
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-black/20 px-2 py-0.5 text-[10px] text-black/65">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
             {account?.monzo_connected ? "Bank synced" : "Scenario data"}
           </span>
         </div>
@@ -92,16 +92,16 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
       detail: (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-black/65">Funded</span>
-            <span className="font-mono text-black/80">{capAtZero(payrollCoveragePercent)}%</span>
+            <span className="text-muted-foreground">Funded</span>
+            <span className="font-mono text-foreground">{capAtZero(payrollCoveragePercent)}%</span>
           </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/70">
             <div
               className={cn("h-full rounded-full", atRisk ? "bg-float-red/80" : "bg-float-green/80")}
               style={{ width: `${capAtZero(Math.min(payrollCoveragePercent, 100))}%` }}
             />
           </div>
-          <p className="text-[10px] text-black/60">Next payroll: {account?.payroll_day || "Friday"}</p>
+          <p className="text-[10px] text-muted-foreground">Next payroll: {account?.payroll_day || "Friday"}</p>
         </div>
       ),
     },
@@ -110,19 +110,19 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
       icon: FileText,
       value: formatCurrency(totalOutstanding, currency),
       badge: `${unpaidCount} open`,
-      badgeClassName: "border-black/25 bg-black/5 text-black/70",
-      iconWrapClassName: "border-black/20 bg-black/5 text-black/80",
+      badgeClassName: "border-border bg-background text-muted-foreground",
+      iconWrapClassName: "border-border bg-background text-foreground",
       detail: (
         <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 text-black/70">
-            <ArrowUpRight size={12} className="text-black/55" />
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <ArrowUpRight size={12} className="text-muted-foreground/80" />
             Can cover {capAtZero(collectionCoveragePercent)}% of payroll
           </span>
           <span className="inline-flex items-center gap-1 rounded-full border border-float-red/30 bg-float-red/10 px-2 py-0.5 text-[10px] font-semibold text-float-red">
             {overdueCount} overdue
           </span>
           {overdueAmount > 0 && (
-            <span className="hidden text-[10px] text-black/60 lg:inline">
+            <span className="hidden text-[10px] text-muted-foreground lg:inline">
               {formatCurrency(overdueAmount, currency)}
             </span>
           )}
@@ -137,18 +137,18 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
       badgeClassName: atRisk
         ? "border-float-amber/35 bg-float-amber/10 text-float-amber"
         : "border-float-green/30 bg-float-green/10 text-float-green",
-      iconWrapClassName: "border-black/20 bg-black/5 text-black/80",
+      iconWrapClassName: "border-border bg-background text-foreground",
       detail: (
         <div className="space-y-1.5">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/70">
             <div
-              className={cn("h-full rounded-full", atRisk ? "bg-float-amber/80" : "bg-black/70")}
+              className={cn("h-full rounded-full", atRisk ? "bg-float-amber/80" : "bg-primary/80")}
               style={{ width: `${runwayProgress}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-[10px]">
-            <span className="text-black/60">Based on 30-day projection</span>
-            <span className="inline-flex items-center gap-1 font-medium text-black/75">
+            <span className="text-muted-foreground">Based on 30-day projection</span>
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
               {atRisk ? <ArrowDownRight size={10} /> : <ArrowUpRight size={10} />}
               {runwayProgress}%
             </span>
@@ -163,16 +163,16 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
       {cards.map((card, idx) => (
         <Card
           key={card.label}
-          className="group relative overflow-hidden rounded-2xl border border-black/15 bg-gradient-to-b from-white via-white to-black/[0.03] shadow-[0_1px_0_rgba(0,0,0,0.15)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_20px_rgba(0,0,0,0.08)]"
+          className="group relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-b from-card via-card to-muted/20 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
           style={{ animationDelay: `${80 + idx * 70}ms` }}
         >
           <CardContent className="space-y-3 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-black/60">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   {card.label}
                 </p>
-                <p className="mt-2 font-mono text-[1.55rem] font-semibold leading-none tabular-nums text-black">
+                <p className="mt-2 font-mono text-[1.55rem] font-semibold leading-none tabular-nums text-foreground">
                   {card.value}
                 </p>
               </div>
@@ -187,7 +187,7 @@ export function KpiCards({ account, invoices }: KpiCardsProps) {
               </div>
             </div>
 
-            <div className="rounded-xl border border-black/10 bg-white/80 px-2.5 py-2">
+            <div className="rounded-xl border border-border/70 bg-background/70 px-2.5 py-2">
               {card.detail}
             </div>
           </CardContent>

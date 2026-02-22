@@ -29,7 +29,7 @@ serve(async (req) => {
     if (!TWILIO_AUTH_TOKEN) throw new Error("TWILIO_AUTH_TOKEN is not configured");
     if (!TWILIO_PHONE_NUMBER) throw new Error("TWILIO_PHONE_NUMBER is not configured");
 
-    const { to, clientName, invoiceNumber, invoiceId, amount, dueDate, callId } = await req.json();
+    const { to, clientName, clientEmail, invoiceNumber, invoiceId, amount, dueDate, callId } = await req.json();
 
     if (!to) throw new Error("'to' phone number is required");
     if (!clientName) throw new Error("'clientName' is required");
@@ -45,6 +45,7 @@ serve(async (req) => {
     <Stream url="${wsUrl}">
       <Parameter name="clientName" value="${escapeXml(clientName)}" />
       <Parameter name="invoiceNumber" value="${escapeXml(invoiceNumber || "")}" />
+      <Parameter name="clientEmail" value="${escapeXml(clientEmail || "")}" />
       <Parameter name="amount" value="${escapeXml(amountFormatted)}" />
       <Parameter name="amountCents" value="${escapeXml(amount || 0)}" />
       <Parameter name="dueDate" value="${escapeXml(dueDate || "")}" />
