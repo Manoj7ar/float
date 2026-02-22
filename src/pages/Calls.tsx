@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -100,6 +100,22 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function normalizePhoneForCall(phone: string | null | undefined) {
+  if (!phone) return null;
+  const trimmed = phone.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/[^\d+]/g, "");
+  if (!/^\+?[1-9]\d{6,14}$/.test(normalized)) return null;
+  return normalized;
+}
+
+function formatDueDateForCall(value: string | null | undefined) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return format(parsed, "MMMM d, yyyy");
+}
+
 function getCallsDemoFallback(accountId: string): Call[] {
   return getDemoCalls(accountId).map((call) => ({
     ...call,
@@ -137,6 +153,8 @@ export default function CallsPage() {
   const [clearingHistory, setClearingHistory] = useState(false);
   const [deletingCallId, setDeletingCallId] = useState<string | null>(null);
   const [usingDemoData, setUsingDemoData] = useState(false);
+  const pendingCallInvoiceIdsRef = useRef<Set<string>>(new Set());
+  const autoCallHandledKeyRef = useRef<string | null>(null);
 
   const loadData = useCallback(
     async (options?: { background?: boolean }) => {
@@ -249,6 +267,7 @@ export default function CallsPage() {
       },
     ) => {
       const demoInvoice = isDemoId(invoice.id);
+      const normalizedPhone = normalizePhoneForCall(invoice.client_phone);
 
       if (!invoice.client_phone) {
         toast({
@@ -258,10 +277,28 @@ export default function CallsPage() {
         });
         return false;
       }
+      if (!normalizedPhone) {
+        toast({
+          variant: "destructive",
+          title: "Invalid phone number",
+          description: "Use a valid phone number (E.164 format recommended, e.g. +353...).",
+        });
+        return false;
+      }
+      if (pendingCallInvoiceIdsRef.current.has(invoice.id)) {
+        if (!options?.silentError) {
+          toast({
+            title: "Call already starting",
+            description: `A call for ${invoice.client_name} is already being initiated.`,
+          });
+        }
+        return false;
+      }
 
+      pendingCallInvoiceIdsRef.current.add(invoice.id);
       setCallingInvoiceId(invoice.id);
+      let callId: string | undefined;
       try {
-        let callId: string | undefined;
         if (account && !demoInvoice) {
           const { data: callRecord, error: insertError } = await supabase
             .from("calls")
@@ -269,7 +306,7 @@ export default function CallsPage() {
               account_id: account.id,
               invoice_id: invoice.id,
               client_name: invoice.client_name,
-              client_phone: invoice.client_phone,
+              client_phone: normalizedPhone,
               status: "initiated",
             })
             .select()
@@ -281,13 +318,13 @@ export default function CallsPage() {
 
         const { data, error } = await supabase.functions.invoke("make-call", {
           body: {
-            to: invoice.client_phone,
+            to: normalizedPhone,
             clientName: invoice.client_name,
             clientEmail: invoice.client_email,
             invoiceNumber: invoice.invoice_number,
             invoiceId: demoInvoice ? undefined : invoice.id,
             amount: invoice.amount,
-            dueDate: invoice.due_date ? format(new Date(invoice.due_date), "MMMM d, yyyy") : undefined,
+            dueDate: formatDueDateForCall(invoice.due_date),
             callId,
           },
         });
@@ -303,12 +340,26 @@ export default function CallsPage() {
         if (!options?.silentSuccess) {
           toast({
             title: "Call initiated",
-            description: `Calling ${invoice.client_name} at ${invoice.client_phone}.`,
+            description: `Calling ${invoice.client_name} at ${normalizedPhone}.`,
           });
         }
 
         return true;
       } catch (error: unknown) {
+        if (callId) {
+          const failureMessage = getErrorMessage(error, "Unable to place the call right now.");
+          const { error: updateError } = await supabase
+            .from("calls")
+            .update({
+              status: "failed",
+              completed_at: new Date().toISOString(),
+              outcome: `Call initiation failed: ${failureMessage}`,
+            })
+            .eq("id", callId);
+          if (updateError) {
+            console.error("Failed to update call status after initiation error:", updateError);
+          }
+        }
         if (!options?.silentError) {
           toast({
             variant: "destructive",
@@ -318,6 +369,7 @@ export default function CallsPage() {
         }
         return false;
       } finally {
+        pendingCallInvoiceIdsRef.current.delete(invoice.id);
         setCallingInvoiceId(null);
       }
     },
@@ -376,8 +428,12 @@ export default function CallsPage() {
     const state = location.state as { autoCallInvoice?: Invoice } | null;
     if (!state?.autoCallInvoice || loading) return;
     if (!account && !isDemoId(state.autoCallInvoice.id)) return;
+    const autoCall = state.autoCallInvoice;
+    const autoCallKey = `${autoCall.id}:${autoCall.client_phone ?? ""}:${autoCall.invoice_number ?? ""}`;
+    if (autoCallHandledKeyRef.current === autoCallKey) return;
+    autoCallHandledKeyRef.current = autoCallKey;
 
-    void startCall(state.autoCallInvoice);
+    void startCall(autoCall);
     navigate(location.pathname, { replace: true, state: null });
   }, [account, loading, location.pathname, location.state, navigate, startCall]);
 

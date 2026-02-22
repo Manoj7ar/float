@@ -15,6 +15,12 @@ const escapeXml = (value: unknown) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 
+const normalizePhone = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  return raw.replace(/[^\d+]/g, "");
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -30,8 +36,12 @@ serve(async (req) => {
     if (!TWILIO_PHONE_NUMBER) throw new Error("TWILIO_PHONE_NUMBER is not configured");
 
     const { to, clientName, clientEmail, invoiceNumber, invoiceId, amount, dueDate, callId } = await req.json();
+    const normalizedTo = normalizePhone(to);
 
-    if (!to) throw new Error("'to' phone number is required");
+    if (!normalizedTo) throw new Error("'to' phone number is required");
+    if (!/^\+?[1-9]\d{6,14}$/.test(normalizedTo)) {
+      throw new Error("Invalid 'to' phone number format");
+    }
     if (!clientName) throw new Error("'clientName' is required");
 
     const amountFormatted = `EUR ${(amount / 100).toLocaleString("en-IE", { minimumFractionDigits: 2 })}`;
@@ -58,12 +68,13 @@ serve(async (req) => {
     const authString = base64Encode(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
 
     const params = new URLSearchParams();
-    params.append("To", to);
+    params.append("To", normalizedTo);
     params.append("From", TWILIO_PHONE_NUMBER);
     params.append("Twiml", twiml);
     if (callId) {
       params.append("StatusCallback", `${SUPABASE_URL}/functions/v1/twilio-status-callback?callId=${callId}`);
     }
+    params.append("StatusCallbackMethod", "POST");
     params.append("StatusCallbackEvent", "completed");
 
     const twilioResponse = await fetch(

@@ -28,22 +28,48 @@ serve(async (req) => {
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
       );
 
+      const normalizedStatus = (callStatus || "").toLowerCase();
+      const statusMap: Record<string, "initiated" | "in-progress" | "completed" | "failed"> = {
+        queued: "initiated",
+        initiated: "initiated",
+        ringing: "initiated",
+        "in-progress": "in-progress",
+        answered: "in-progress",
+        completed: "completed",
+        busy: "failed",
+        failed: "failed",
+        "no-answer": "failed",
+        canceled: "failed",
+        cancelled: "failed",
+      };
+      const mappedStatus = statusMap[normalizedStatus] ?? (normalizedStatus === "completed" ? "completed" : "failed");
+      const isTerminal = mappedStatus === "completed" || mappedStatus === "failed";
+
       const updates: Record<string, unknown> = {
-        status: callStatus === "completed" ? "completed" : "failed",
-        completed_at: new Date().toISOString(),
+        status: mappedStatus,
       };
 
-      if (callDuration) {
-        updates.duration_seconds = parseInt(callDuration, 10);
+      if (isTerminal) {
+        updates.completed_at = new Date().toISOString();
       }
 
-      if (callStatus === "completed") {
+      if (callDuration) {
+        const parsedDuration = parseInt(callDuration, 10);
+        if (!Number.isNaN(parsedDuration)) {
+          updates.duration_seconds = parsedDuration;
+        }
+      }
+
+      if (mappedStatus === "completed") {
         updates.outcome = `Call completed successfully. Duration: ${callDuration || 0}s`;
-      } else {
+      } else if (mappedStatus === "failed") {
         updates.outcome = `Call ${callStatus}`;
       }
 
-      await supabase.from("calls").update(updates).eq("id", callId);
+      const { error: updateError } = await supabase.from("calls").update(updates).eq("id", callId);
+      if (updateError) {
+        console.error("Failed to update call status:", updateError);
+      }
     }
 
     return new Response("OK", {
