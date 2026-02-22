@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="ChatGPT%20Image%20Feb%2020,%202026,%2005_14_43%20PM.png" alt="Float logo" width="180" />
+  <img src="Assets/ChatGPT Image Feb 20, 2026, 05_14_43 PM.png" alt="Float logo" width="180" />
 </p>
 
 <h1 align="center">Float - AI CFO for Small Businesses</h1>
