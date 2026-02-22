@@ -27,24 +27,6 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
   const hasAnimatedOnce = useRef(false);
   const today = new Date("2026-02-21");
 
-  // Generate mock breakdown for a projected day
-  const generateBreakdown = useCallback((dateLabel: string, projected: number) => {
-    const incomeItems = [
-      { label: "Client payments", amount: Math.round(projected * 0.35) },
-      { label: "Recurring revenue", amount: Math.round(projected * 0.25) },
-      { label: "Late payments", amount: Math.round(projected * 0.08) },
-    ];
-    const totalIncome = incomeItems.reduce((s, i) => s + i.amount, 0);
-    const totalExpenses = totalIncome - (projected - (chartData.find(d => d.date === dateLabel)?.projected ?? projected));
-    const expenseItems = [
-      { label: "Payroll", amount: Math.round(totalExpenses * 0.45) },
-      { label: "Suppliers", amount: Math.round(totalExpenses * 0.25) },
-      { label: "Rent & utilities", amount: Math.round(totalExpenses * 0.18) },
-      { label: "Other", amount: Math.round(totalExpenses * 0.12) },
-    ];
-    return { date: dateLabel, projected, income: incomeItems, expenses: expenseItems };
-  }, []);
-
   // Trigger animation on mount / range change
   useEffect(() => {
     setAnimate(false);
@@ -93,6 +75,25 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
 
   const hasData = chartData.length > 1;
 
+  // Generate mock breakdown for a projected day
+  const generateBreakdown = useCallback((dateLabel: string, projected: number) => {
+    const incomeItems = [
+      { label: "Client payments", amount: Math.round(projected * 0.35) },
+      { label: "Recurring revenue", amount: Math.round(projected * 0.25) },
+      { label: "Late payments", amount: Math.round(projected * 0.08) },
+    ];
+    const totalIncome = incomeItems.reduce((s, i) => s + i.amount, 0);
+    const projectedPoint = chartData.find((d) => d.date === dateLabel)?.projected ?? projected;
+    const totalExpenses = totalIncome - (projected - projectedPoint);
+    const expenseItems = [
+      { label: "Payroll", amount: Math.round(totalExpenses * 0.45) },
+      { label: "Suppliers", amount: Math.round(totalExpenses * 0.25) },
+      { label: "Rent & utilities", amount: Math.round(totalExpenses * 0.18) },
+      { label: "Other", amount: Math.round(totalExpenses * 0.12) },
+    ];
+    return { date: dateLabel, projected, income: incomeItems, expenses: expenseItems };
+  }, [chartData]);
+
   const stats = useMemo(() => {
     const historicalValues = chartData.filter((d) => d.balance !== null).map((d) => d.balance!);
     const projectedValues = chartData.filter((d) => d.projected !== null).map((d) => d.projected!);
@@ -111,6 +112,66 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
   }, [chartData, payrollThreshold]);
 
   const todayIndex = chartData.findIndex((d) => d.isToday);
+  const futureProjectedData = useMemo(
+    () => chartData.filter((d) => d.projected !== null && !d.isToday),
+    [chartData],
+  );
+  const forecastEndLabel = futureProjectedData[futureProjectedData.length - 1]?.date;
+
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!hasData) {
+      return [0, Math.max(payrollThreshold, 1)];
+    }
+
+    const lower = Math.min(stats.min, payrollThreshold, 0);
+    const upper = Math.max(stats.max, payrollThreshold);
+    const spread = Math.max(1, upper - lower);
+    const padding = Math.max(Math.round(spread * 0.12), 80_000);
+    const step = 50_000;
+
+    return [
+      Math.floor((lower - padding) / step) * step,
+      Math.ceil((upper + padding) / step) * step,
+    ];
+  }, [hasData, payrollThreshold, stats.max, stats.min]);
+
+  const visibleTickIndexes = useMemo(() => {
+    const total = chartData.length;
+    if (total <= 8) return new Set(Array.from({ length: total }, (_, i) => i));
+
+    const targetTicks = range === "60d" ? 8 : range === "30d" ? 7 : 6;
+    const stride = Math.max(1, Math.round(total / targetTicks));
+    const indexes = new Set<number>([0, total - 1]);
+
+    for (let i = 0; i < total; i += stride) indexes.add(i);
+    if (todayIndex >= 0) {
+      indexes.add(todayIndex);
+      [-5, -3, 3, 5].forEach((offset) => {
+        const idx = todayIndex + offset;
+        if (idx > 0 && idx < total - 1) indexes.add(idx);
+      });
+    }
+
+    return indexes;
+  }, [chartData.length, range, todayIndex]);
+
+  const formatXAxisTick = useCallback((value: string, index: number) => {
+    if (value === "Today") return "Today";
+    return visibleTickIndexes.has(index) ? value : "";
+  }, [visibleTickIndexes]);
+
+  const formatYAxisTick = useCallback((value: number) => {
+    const units = value / 100;
+    const abs = Math.abs(units);
+    if (abs >= 1_000_000) return `${units < 0 ? "-" : ""}${(abs / 1_000_000).toFixed(1)}m`;
+    if (abs >= 1_000) return `${units < 0 ? "-" : ""}${(abs / 1_000).toFixed(1)}k`;
+    return `${units.toFixed(0)}`;
+  }, []);
+
+  const handleProjectedPointSelect = useCallback((payload?: { date?: string; projected?: number | null }) => {
+    if (!payload?.date || payload.projected == null) return;
+    setDrilldown({ date: payload.date, projected: payload.projected });
+  }, []);
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
@@ -121,6 +182,8 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
     const val = balVal ?? projVal;
     if (val == null) return null;
     const isProjected = balVal == null;
+    const thresholdGap = val - payrollThreshold;
+    const deltaFromCurrent = isProjected ? val - stats.currentBalance : null;
 
     return (
       <div className="rounded-2xl border border-border/70 bg-background/95 px-4 py-3 shadow-xl backdrop-blur-md">
@@ -131,6 +194,11 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
         {isProjected && (
           <p className="mt-0.5 flex items-center gap-1 text-[9px] font-medium text-primary">
             <Sparkles size={8} /> AI projected
+          </p>
+        )}
+        {isProjected && deltaFromCurrent != null && (
+          <p className={`mt-1 text-[10px] font-medium ${deltaFromCurrent >= 0 ? "text-float-green" : "text-float-red"}`}>
+            {deltaFromCurrent >= 0 ? "+" : ""}{formatCurrency(deltaFromCurrent)} vs today
           </p>
         )}
         {showScenarios && bestVal != null && worstVal != null && (
@@ -150,6 +218,14 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
             <TrendingDown size={10} /> Below payroll threshold
           </p>
         )}
+        {val >= payrollThreshold && (
+          <p className="mt-1 text-[10px] font-medium text-float-green">
+            {formatCurrency(thresholdGap)} above payroll threshold
+          </p>
+        )}
+        {isProjected && (
+          <p className="mt-1 text-[9px] text-muted-foreground">Click point for breakdown</p>
+        )}
       </div>
     );
   };
@@ -165,6 +241,39 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
         </circle>
         <circle cx={cx} cy={cy} r={5} fill="hsl(var(--primary))" opacity={0.15} />
         <circle cx={cx} cy={cy} r={3.5} fill="hsl(var(--card))" stroke="hsl(var(--primary))" strokeWidth={2.5} />
+      </g>
+    );
+  };
+
+  const ProjectedDot = (props: any) => {
+    const { cx, cy, payload } = props;
+    if (!cx || !cy || !payload || payload.projected == null || payload.isToday) return null;
+
+    const isBelowThreshold = payload.projected < payrollThreshold;
+    const isSelected = drilldown?.date === payload.date;
+
+    return (
+      <g
+        onClick={() => handleProjectedPointSelect(payload)}
+        style={{ cursor: "pointer" }}
+      >
+        {isBelowThreshold && (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={isSelected ? 8 : 6.5}
+            fill="hsl(var(--float-red))"
+            opacity={0.12}
+          />
+        )}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={isSelected ? 4.5 : 3.5}
+          fill="hsl(var(--card))"
+          stroke={isBelowThreshold ? "hsl(var(--float-red))" : "hsl(var(--float-amber))"}
+          strokeWidth={isSelected ? 2.4 : 1.8}
+        />
       </g>
     );
   };
@@ -273,6 +382,7 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
               animate ? "translate-y-0 scale-100 opacity-100" : "translate-y-4 scale-[0.985] opacity-0"
             }`}
           >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-primary/[0.04] via-primary/[0.02] to-transparent" />
             <ResponsiveContainer width="100%" height={320}>
               <AreaChart data={chartData} margin={{ top: 18, right: 18, left: -6, bottom: 6 }}>
                 <defs>
@@ -310,26 +420,39 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  tickFormatter={formatXAxisTick}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
                   tickMargin={12}
                 />
                 <YAxis
-                  tickFormatter={(v: number) => {
-                    const units = v / 100;
-                    const abs = Math.abs(units);
-                    if (abs >= 1_000_000) return `${units < 0 ? "-" : ""}${(abs / 1_000_000).toFixed(1)}m`;
-                    if (abs >= 1_000) return `${units < 0 ? "-" : ""}${(abs / 1_000).toFixed(1)}k`;
-                    return `${units.toFixed(0)}`;
-                  }}
+                  tickFormatter={formatYAxisTick}
                   tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                   tickLine={false}
                   axisLine={false}
                   width={56}
                   tickMargin={8}
+                  tickCount={6}
+                  domain={yDomain}
                 />
-                <Tooltip content={<CustomTooltip />} cursor={<CustomCursor />} wrapperStyle={{ outline: "none" }} />
+                <Tooltip
+                  content={<CustomTooltip />}
+                  cursor={<CustomCursor />}
+                  wrapperStyle={{ outline: "none" }}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                />
+
+                {/* Forecast window shading */}
+                {forecastEndLabel && (
+                  <ReferenceArea
+                    x1="Today"
+                    x2={forecastEndLabel}
+                    fill="hsl(var(--primary))"
+                    fillOpacity={0.035}
+                    ifOverflow="extendDomain"
+                  />
+                )}
 
                 {/* Danger zone below payroll threshold */}
                 <ReferenceArea
@@ -337,6 +460,16 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
                   y2={payrollThreshold}
                   fill="url(#dangerGrad)"
                 />
+
+                {/* Zero balance baseline */}
+                {yDomain[0] < 0 && yDomain[1] > 0 && (
+                  <ReferenceLine
+                    y={0}
+                    stroke="hsl(var(--foreground))"
+                    strokeOpacity={0.12}
+                    strokeDasharray="3 4"
+                  />
+                )}
 
                 {/* Payroll threshold line */}
                 <ReferenceLine
@@ -443,7 +576,7 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
                   animationEasing="ease-out"
                   animationBegin={360}
                   connectNulls={false}
-                  dot={false}
+                  dot={<ProjectedDot />}
                   activeDot={{
                     r: 6,
                     strokeWidth: 2.5,
@@ -451,9 +584,7 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
                     stroke: "hsl(var(--float-amber))",
                     cursor: "pointer",
                     onClick: (_: any, e: any) => {
-                      if (e?.payload?.projected != null) {
-                        setDrilldown({ date: e.payload.date, projected: e.payload.projected });
-                      }
+                      handleProjectedPointSelect(e?.payload);
                     },
                   } as any}
                 />
@@ -474,6 +605,7 @@ export function CashflowChart({ projections, payrollThreshold }: CashflowChartPr
               <div className="h-3 w-4 rounded-sm border border-float-red/20 bg-float-red/[0.09]" />
               <span className="text-[10px] text-muted-foreground">Danger zone</span>
             </div>
+            <span className="text-[10px] text-muted-foreground">Click forecast dots for breakdown</span>
           </div>
         )}
 
